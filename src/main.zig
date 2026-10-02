@@ -1,4 +1,5 @@
 const std = @import("std");
+const grammar = @import("grammar.zig");
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -33,24 +34,16 @@ pub fn main(init: std.process.Init) !void {
             \\       CMPS3111 PROJECT 2
             \\========================================
             \\
-            \\BNF Grammar
-            \\
-            \\<graph> → start <plot_stmts> end
-            \\<plot_stmts> → <plot>
-            \\             | <plot> ; <plot_stmts>
-            \\<plot> → bar <x><y>,<y>
-            \\        | line <x><y>,<x><y>
-            \\        | grid <x><y>
-            \\        | fill <x><y>
-            \\<x> → a | b | c | d | e | f | g | h | i | j
-            \\<y> → 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
-            \\
+        );
+
+        try grammar.display(stdout);
+
+        try stdout.writeAll(
             \\========================================
             \\
         );
 
         try stdout.flush();
-
         // ========================================
         // Prompt for an input sentence
         // ========================================
