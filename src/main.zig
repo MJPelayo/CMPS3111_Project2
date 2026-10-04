@@ -4,7 +4,8 @@ const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
 const derivation = @import("derivation.zig");
 const parse_tree = @import("parse_tree.zig");
-const graphics = @import("graphics.zig");
+const terminal_graphics = @import("terminal_graphics.zig");
+const plot = @import("plot.zig");
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -49,7 +50,8 @@ pub fn main(init: std.process.Init) !void {
 
         try stdout.flush();
 
-        const input = try stdin.takeDelimiter('\n') orelse break;
+        const input =
+            try stdin.takeDelimiter('\n') orelse break;
 
         const sentence = std.mem.trim(
             u8,
@@ -154,16 +156,36 @@ pub fn main(init: std.process.Init) !void {
             "----------------------------------------\n",
         );
 
-        try stdout.writeAll(
-            "\nInput accepted.\n",
+        // Build the actual Graph representation for
+        // the graphical-output stage.
+        var plots: [100]plot.Plot = undefined;
+
+        var graphics_parser = parser.Parser.init(
+            tokens[0..token_count],
+        );
+
+        const graph =
+            graphics_parser.parseGraphInto(
+                &plots,
+            ) catch |err| {
+                try stdout.print(
+                    "\nGRAPH DATA ERROR: {s}\n\n",
+                    .{@errorName(err)},
+                );
+
+                try stdout.flush();
+                continue;
+            };
+
+        try terminal_graphics.displayGraph(
+            stdout,
+            graph,
         );
 
         try stdout.writeAll(
-            "Opening graphics window...\n\n",
+            "\nInput accepted.\n\n",
         );
 
         try stdout.flush();
-
-        graphics.showTestWindow();
     }
 }
