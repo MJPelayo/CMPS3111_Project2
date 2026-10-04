@@ -1,14 +1,15 @@
 const std = @import("std");
 const grammar = @import("grammar.zig");
+const lexer = @import("lexer.zig");
+const parser = @import("parser.zig");
+const derivation = @import("derivation.zig");
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
 
-    // Buffers used for terminal input and output.
     var input_buffer: [1024]u8 = undefined;
     var output_buffer: [4096]u8 = undefined;
 
-    // Create the standard input reader.
     var stdin_reader = std.Io.File.stdin().reader(
         io,
         &input_buffer,
@@ -16,7 +17,6 @@ pub fn main(init: std.process.Init) !void {
 
     const stdin = &stdin_reader.interface;
 
-    // Create the standard output writer.
     var stdout_writer = std.Io.File.stdout().writer(
         io,
         &output_buffer,
@@ -25,10 +25,6 @@ pub fn main(init: std.process.Init) !void {
     const stdout = &stdout_writer.interface;
 
     while (true) {
-        // ========================================
-        // Display the BNF grammar
-        // ========================================
-
         try stdout.writeAll(
             \\========================================
             \\       CMPS3111 PROJECT 2
@@ -44,9 +40,6 @@ pub fn main(init: std.process.Init) !void {
         );
 
         try stdout.flush();
-        // ========================================
-        // Prompt for an input sentence
-        // ========================================
 
         try stdout.writeAll(
             "Enter an input string (or STOP to terminate): ",
@@ -54,26 +47,29 @@ pub fn main(init: std.process.Init) !void {
 
         try stdout.flush();
 
-        // Read one complete line from the user.
-        const input = stdin.takeDelimiterExclusive('\n') catch |err| {
-            if (err == error.EndOfStream) {
-                break;
-            }
+        // ----------------------------------------------------
+        // Read one complete input line.
+        //
+        // takeDelimiter() returns an error union containing
+        // an optional slice:
+        //
+        // !?[]u8
+        //
+        // try handles a read error.
+        // orelse handles end-of-input.
+        // ----------------------------------------------------
 
-            return err;
-        };
+        const input = try stdin.takeDelimiter('\n') orelse break;
 
-        // Remove the carriage return that can appear with
-        // Windows-style CRLF input.
         const sentence = std.mem.trim(
             u8,
             input,
             "\r",
         );
 
-        // ========================================
-        // Exact STOP check
-        // ========================================
+        // ----------------------------------------------------
+        // STOP command
+        // ----------------------------------------------------
 
         if (std.mem.eql(u8, sentence, "STOP")) {
             try stdout.writeAll(
@@ -84,17 +80,87 @@ pub fn main(init: std.process.Init) !void {
             break;
         }
 
-        // ========================================
-        // Temporary placeholder
-        // ========================================
+        // ----------------------------------------------------
+        // Empty input
+        // ----------------------------------------------------
 
-        try stdout.print(
-            "\nYou entered: {s}\n",
-            .{sentence},
+        if (sentence.len == 0) {
+            try stdout.writeAll(
+                "\nError: Empty input.\n\n",
+            );
+
+            try stdout.flush();
+            continue;
+        }
+
+        // ----------------------------------------------------
+        // LEXICAL ANALYSIS
+        // ----------------------------------------------------
+
+        var tokens: [100]lexer.Token = undefined;
+
+        const token_count = lexer.tokenize(
+            sentence,
+            &tokens,
+        ) catch |err| {
+            try stdout.print(
+                "\nLEXICAL ERROR: {s}\n\n",
+                .{@errorName(err)},
+            );
+
+            try stdout.flush();
+            continue;
+        };
+
+        // ----------------------------------------------------
+        // SYNTACTIC ANALYSIS
+        // ----------------------------------------------------
+
+        var graph_parser = parser.Parser.init(
+            tokens[0..token_count],
+        );
+
+        graph_parser.parseGraph() catch |err| {
+            try stdout.print(
+                "\nSYNTAX ERROR: {s}\n\n",
+                .{@errorName(err)},
+            );
+
+            try stdout.flush();
+            continue;
+        };
+
+        // ----------------------------------------------------
+        // LEFTMOST DERIVATION
+        // ----------------------------------------------------
+
+        try stdout.writeAll(
+            "\nLEFTMOST DERIVATION\n",
         );
 
         try stdout.writeAll(
-            "Parser not implemented yet.\n\n",
+            "----------------------------------------\n",
+        );
+
+        derivation.displayGraphDerivation(
+            stdout,
+            tokens[0..token_count],
+        ) catch |err| {
+            try stdout.print(
+                "\nDERIVATION ERROR: {s}\n\n",
+                .{@errorName(err)},
+            );
+
+            try stdout.flush();
+            continue;
+        };
+
+        try stdout.writeAll(
+            "----------------------------------------\n",
+        );
+
+        try stdout.writeAll(
+            "Input accepted.\n\n",
         );
 
         try stdout.flush();
