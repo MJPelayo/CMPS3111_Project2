@@ -4,6 +4,7 @@ const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
 const derivation = @import("derivation.zig");
 const parse_tree = @import("parse_tree.zig");
+const graphics = @import("graphics.zig");
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -48,10 +49,6 @@ pub fn main(init: std.process.Init) !void {
 
         try stdout.flush();
 
-        // ----------------------------------------------------
-        // Read one complete input line.
-        // ----------------------------------------------------
-
         const input = try stdin.takeDelimiter('\n') orelse break;
 
         const sentence = std.mem.trim(
@@ -59,10 +56,6 @@ pub fn main(init: std.process.Init) !void {
             input,
             "\r",
         );
-
-        // ----------------------------------------------------
-        // STOP command
-        // ----------------------------------------------------
 
         if (std.mem.eql(u8, sentence, "STOP")) {
             try stdout.writeAll(
@@ -73,10 +66,6 @@ pub fn main(init: std.process.Init) !void {
             break;
         }
 
-        // ----------------------------------------------------
-        // Empty input
-        // ----------------------------------------------------
-
         if (sentence.len == 0) {
             try stdout.writeAll(
                 "\nError: Empty input.\n\n",
@@ -85,10 +74,6 @@ pub fn main(init: std.process.Init) !void {
             try stdout.flush();
             continue;
         }
-
-        // ----------------------------------------------------
-        // LEXICAL ANALYSIS
-        // ----------------------------------------------------
 
         var tokens: [100]lexer.Token = undefined;
 
@@ -105,10 +90,6 @@ pub fn main(init: std.process.Init) !void {
             continue;
         };
 
-        // ----------------------------------------------------
-        // SYNTACTIC ANALYSIS
-        // ----------------------------------------------------
-
         var graph_parser = parser.Parser.init(
             tokens[0..token_count],
         );
@@ -122,10 +103,6 @@ pub fn main(init: std.process.Init) !void {
             try stdout.flush();
             continue;
         };
-
-        // ----------------------------------------------------
-        // LEFTMOST DERIVATION
-        // ----------------------------------------------------
 
         try stdout.writeAll(
             "\nLEFTMOST DERIVATION\n",
@@ -151,10 +128,6 @@ pub fn main(init: std.process.Init) !void {
         try stdout.writeAll(
             "----------------------------------------\n",
         );
-
-        // ----------------------------------------------------
-        // PARSE TREE
-        // ----------------------------------------------------
 
         try stdout.writeAll(
             "\nPARSE TREE\n",
@@ -182,9 +155,15 @@ pub fn main(init: std.process.Init) !void {
         );
 
         try stdout.writeAll(
-            "\nInput accepted.\n\n",
+            "\nInput accepted.\n",
+        );
+
+        try stdout.writeAll(
+            "Opening graphics window...\n\n",
         );
 
         try stdout.flush();
+
+        graphics.showTestWindow();
     }
 }
