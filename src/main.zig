@@ -3,6 +3,7 @@ const grammar = @import("grammar.zig");
 const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
 const derivation = @import("derivation.zig");
+const parse_tree = @import("parse_tree.zig");
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -49,14 +50,6 @@ pub fn main(init: std.process.Init) !void {
 
         // ----------------------------------------------------
         // Read one complete input line.
-        //
-        // takeDelimiter() returns an error union containing
-        // an optional slice:
-        //
-        // !?[]u8
-        //
-        // try handles a read error.
-        // orelse handles end-of-input.
         // ----------------------------------------------------
 
         const input = try stdin.takeDelimiter('\n') orelse break;
@@ -159,8 +152,37 @@ pub fn main(init: std.process.Init) !void {
             "----------------------------------------\n",
         );
 
+        // ----------------------------------------------------
+        // PARSE TREE
+        // ----------------------------------------------------
+
         try stdout.writeAll(
-            "Input accepted.\n\n",
+            "\nPARSE TREE\n",
+        );
+
+        try stdout.writeAll(
+            "----------------------------------------\n",
+        );
+
+        parse_tree.displayGraphParseTree(
+            stdout,
+            tokens[0..token_count],
+        ) catch |err| {
+            try stdout.print(
+                "\nPARSE TREE ERROR: {s}\n\n",
+                .{@errorName(err)},
+            );
+
+            try stdout.flush();
+            continue;
+        };
+
+        try stdout.writeAll(
+            "----------------------------------------\n",
+        );
+
+        try stdout.writeAll(
+            "\nInput accepted.\n\n",
         );
 
         try stdout.flush();
