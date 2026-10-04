@@ -1,5 +1,6 @@
 const std = @import("std");
 const lexer = @import("lexer.zig");
+const plot = @import("plot.zig");
 
 pub const ParserError = error{
     UnexpectedEndOfInput,
@@ -10,6 +11,7 @@ pub const ParserError = error{
     ExpectedCoordinate,
     ExpectedComma,
     ExpectedNumber,
+    TooManyPlots,
 };
 
 pub const Parser = struct {
@@ -31,6 +33,8 @@ pub const Parser = struct {
     // Parse the complete <graph>.
     //
     // <graph> → start <plot_stmts> end
+    //
+    // This function only validates the grammar.
     // --------------------------------------------------------
 
     pub fn parseGraph(self: *Parser) ParserError!void {
@@ -50,6 +54,43 @@ pub const Parser = struct {
     }
 
     // --------------------------------------------------------
+    // Parse the complete <graph> and build a Graph structure.
+    //
+    // The caller provides the storage where the Plot structures
+    // will be stored.
+    //
+    // This uses the same grammar validation as parseGraph().
+    // --------------------------------------------------------
+
+    pub fn parseGraphInto(
+        self: *Parser,
+        plots: []plot.Plot,
+    ) ParserError!plot.Graph {
+        var plot_count: usize = 0;
+
+        // <graph> must begin with "start".
+        try self.expect(.start);
+
+        // Parse one or more plots and store them.
+        try self.parsePlotStatementsInto(
+            plots,
+            &plot_count,
+        );
+
+        // <graph> must finish with "end".
+        try self.expect(.end);
+
+        // There must not be any tokens after "end".
+        if (self.position < self.tokens.len) {
+            return error.UnexpectedToken;
+        }
+
+        return .{
+            .plots = plots[0..plot_count],
+        };
+    }
+
+    // --------------------------------------------------------
     // Parse <plot_stmts>.
     //
     // <plot_stmts> → <plot>
@@ -66,6 +107,30 @@ pub const Parser = struct {
         // Every semicolon means another plot follows.
         while (self.match(.semicolon)) {
             try self.parsePlot();
+        }
+    }
+
+    // --------------------------------------------------------
+    // Parse <plot_stmts> while building Plot structures.
+    // --------------------------------------------------------
+
+    fn parsePlotStatementsInto(
+        self: *Parser,
+        plots: []plot.Plot,
+        plot_count: *usize,
+    ) ParserError!void {
+        // There must be at least one plot.
+        try self.parsePlotInto(
+            plots,
+            plot_count,
+        );
+
+        // Every semicolon means another plot follows.
+        while (self.match(.semicolon)) {
+            try self.parsePlotInto(
+                plots,
+                plot_count,
+            );
         }
     }
 
@@ -124,6 +189,104 @@ pub const Parser = struct {
     }
 
     // --------------------------------------------------------
+    // Parse one <plot> and create its Plot structure.
+    // --------------------------------------------------------
+
+    fn parsePlotInto(
+        self: *Parser,
+        plots: []plot.Plot,
+        plot_count: *usize,
+    ) ParserError!void {
+        // Make sure there is room for another plot.
+        if (plot_count.* >= plots.len) {
+            return error.TooManyPlots;
+        }
+
+        // ----------------------------------------------------
+        // bar <x><y>,<y>
+        // ----------------------------------------------------
+
+        if (self.match(.bar)) {
+            const coordinate = try self.readCoordinate();
+
+            try self.expect(.comma);
+
+            const number_token = try self.expectAndReturn(.number);
+
+            plots[plot_count.*] = .{
+                .kind = .bar,
+                .first_coordinate = coordinate,
+                .second_coordinate = null,
+                .number = number_token.lexeme[0] - '0',
+            };
+
+            plot_count.* += 1;
+            return;
+        }
+
+        // ----------------------------------------------------
+        // line <x><y>,<x><y>
+        // ----------------------------------------------------
+
+        if (self.match(.line)) {
+            const first_coordinate = try self.readCoordinate();
+
+            try self.expect(.comma);
+
+            const second_coordinate = try self.readCoordinate();
+
+            plots[plot_count.*] = .{
+                .kind = .line,
+                .first_coordinate = first_coordinate,
+                .second_coordinate = second_coordinate,
+                .number = null,
+            };
+
+            plot_count.* += 1;
+            return;
+        }
+
+        // ----------------------------------------------------
+        // grid <x><y>
+        // ----------------------------------------------------
+
+        if (self.match(.grid)) {
+            const coordinate = try self.readCoordinate();
+
+            plots[plot_count.*] = .{
+                .kind = .grid,
+                .first_coordinate = coordinate,
+                .second_coordinate = null,
+                .number = null,
+            };
+
+            plot_count.* += 1;
+            return;
+        }
+
+        // ----------------------------------------------------
+        // fill <x><y>
+        // ----------------------------------------------------
+
+        if (self.match(.fill)) {
+            const coordinate = try self.readCoordinate();
+
+            plots[plot_count.*] = .{
+                .kind = .fill,
+                .first_coordinate = coordinate,
+                .second_coordinate = null,
+                .number = null,
+            };
+
+            plot_count.* += 1;
+            return;
+        }
+
+        // No valid plot command was found.
+        return error.ExpectedPlot;
+    }
+
+    // --------------------------------------------------------
     // Parse a coordinate.
     //
     // <x><y>
@@ -134,6 +297,27 @@ pub const Parser = struct {
 
     fn parseCoordinate(self: *Parser) ParserError!void {
         try self.expect(.coordinate);
+    }
+
+    // --------------------------------------------------------
+    // Read a coordinate and convert it into [2]u8.
+    //
+    // Example:
+    //
+    // "a1" → ['a', '1']
+    // --------------------------------------------------------
+
+    fn readCoordinate(self: *Parser) ParserError![2]u8 {
+        const token = try self.expectAndReturn(.coordinate);
+
+        if (token.lexeme.len != 2) {
+            return error.ExpectedCoordinate;
+        }
+
+        return .{
+            token.lexeme[0],
+            token.lexeme[1],
+        };
     }
 
     // --------------------------------------------------------
@@ -166,11 +350,27 @@ pub const Parser = struct {
         self: *Parser,
         expected: lexer.TokenKind,
     ) ParserError!void {
+        _ = try self.expectAndReturn(expected);
+    }
+
+    // --------------------------------------------------------
+    // Require a specific token and return that token.
+    //
+    // This is useful when we need the actual coordinate or
+    // number value to build a Plot structure.
+    // --------------------------------------------------------
+
+    fn expectAndReturn(
+        self: *Parser,
+        expected: lexer.TokenKind,
+    ) ParserError!lexer.Token {
         if (self.position >= self.tokens.len) {
             return error.UnexpectedEndOfInput;
         }
 
-        if (self.tokens[self.position].kind != expected) {
+        const token = self.tokens[self.position];
+
+        if (token.kind != expected) {
             return switch (expected) {
                 .start => error.ExpectedStart,
                 .end => error.ExpectedEnd,
@@ -185,6 +385,7 @@ pub const Parser = struct {
         }
 
         self.position += 1;
+        return token;
     }
 };
 
@@ -527,5 +728,130 @@ test "reject extra tokens after end" {
     try std.testing.expectError(
         error.UnexpectedToken,
         parser.parseGraph(),
+    );
+}
+
+// ============================================================
+// Parser → Plot/Graph tests
+// ============================================================
+
+test "build graph containing one bar plot" {
+    const input = "start bar a1,5 end";
+
+    var tokens: [20]lexer.Token = undefined;
+
+    const token_count = try lexer.tokenize(
+        input,
+        &tokens,
+    );
+
+    var parser = Parser.init(
+        tokens[0..token_count],
+    );
+
+    var plots: [10]plot.Plot = undefined;
+
+    const graph = try parser.parseGraphInto(
+        &plots,
+    );
+
+    try std.testing.expectEqual(
+        @as(usize, 1),
+        graph.plots.len,
+    );
+
+    try std.testing.expectEqual(
+        plot.PlotKind.bar,
+        graph.plots[0].kind,
+    );
+
+    try std.testing.expectEqual(
+        @as([2]u8, .{ 'a', '1' }),
+        graph.plots[0].first_coordinate,
+    );
+
+    try std.testing.expectEqual(
+        @as(u8, 5),
+        graph.plots[0].number.?,
+    );
+}
+
+test "build graph containing mixed plots" {
+    const input =
+        "start bar a1,5;line b2,c3;grid d4;fill e5 end";
+
+    var tokens: [40]lexer.Token = undefined;
+
+    const token_count = try lexer.tokenize(
+        input,
+        &tokens,
+    );
+
+    var parser = Parser.init(
+        tokens[0..token_count],
+    );
+
+    var plots: [10]plot.Plot = undefined;
+
+    const graph = try parser.parseGraphInto(
+        &plots,
+    );
+
+    try std.testing.expectEqual(
+        @as(usize, 4),
+        graph.plots.len,
+    );
+
+    try std.testing.expectEqual(
+        plot.PlotKind.bar,
+        graph.plots[0].kind,
+    );
+
+    try std.testing.expectEqual(
+        plot.PlotKind.line,
+        graph.plots[1].kind,
+    );
+
+    try std.testing.expectEqual(
+        plot.PlotKind.grid,
+        graph.plots[2].kind,
+    );
+
+    try std.testing.expectEqual(
+        plot.PlotKind.fill,
+        graph.plots[3].kind,
+    );
+
+    try std.testing.expectEqual(
+        @as([2]u8, .{ 'b', '2' }),
+        graph.plots[1].first_coordinate,
+    );
+
+    try std.testing.expectEqual(
+        @as([2]u8, .{ 'c', '3' }),
+        graph.plots[1].second_coordinate.?,
+    );
+}
+
+test "reject graph when plot storage is too small" {
+    const input =
+        "start bar a1,5;grid b2 end";
+
+    var tokens: [30]lexer.Token = undefined;
+
+    const token_count = try lexer.tokenize(
+        input,
+        &tokens,
+    );
+
+    var parser = Parser.init(
+        tokens[0..token_count],
+    );
+
+    var plots: [1]plot.Plot = undefined;
+
+    try std.testing.expectError(
+        error.TooManyPlots,
+        parser.parseGraphInto(&plots),
     );
 }

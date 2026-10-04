@@ -1,14 +1,17 @@
 const std = @import("std");
 const lexer = @import("lexer.zig");
+const parser = @import("parser.zig");
+const plot = @import("plot.zig");
 
 pub const DerivationError = error{
     InvalidCoordinate,
     InvalidNumber,
     InvalidInput,
+    TooManyPlots,
 };
 
 // ============================================================
-// Display the leftmost derivation for a complete graph.
+// Display a true LEFTMOST derivation for a complete graph.
 //
 // Grammar:
 //
@@ -27,655 +30,538 @@ pub fn displayGraphDerivation(
     writer: *std.Io.Writer,
     tokens: []const lexer.Token,
 ) !void {
-    if (tokens.len < 3) {
+    var plots: [100]plot.Plot = undefined;
+
+    var graph_parser = parser.Parser.init(tokens);
+
+    const graph = graph_parser.parseGraphInto(&plots) catch |err| {
+        return switch (err) {
+            error.TooManyPlots => error.TooManyPlots,
+            else => error.InvalidInput,
+        };
+    };
+
+    if (graph.plots.len == 0) {
         return error.InvalidInput;
     }
 
-    // The first derivation step is always <graph>.
-    try printStep(writer, "<graph>");
+    // --------------------------------------------------------
+    // <graph>
+    // --------------------------------------------------------
 
-    // Expand <graph>.
+    try printStep(
+        writer,
+        "<graph>",
+    );
+
+    // --------------------------------------------------------
+    // <graph> → start <plot_stmts> end
+    // --------------------------------------------------------
+
     try printStep(
         writer,
         "start <plot_stmts> end",
     );
 
-    // We now derive the complete plot statement list.
-    try displayPlotStatements(
-        writer,
-        tokens,
-    );
+    // --------------------------------------------------------
+    // Expand <plot_stmts>.
+    //
+    // Multiple plots:
+    //
+    // <plot_stmts> → <plot> ; <plot_stmts>
+    //
+    // One plot:
+    //
+    // <plot_stmts> → <plot>
+    // --------------------------------------------------------
+
+    if (graph.plots.len > 1) {
+        try printStep(
+            writer,
+            "start <plot> ; <plot_stmts> end",
+        );
+    } else {
+        try printStep(
+            writer,
+            "start <plot> end",
+        );
+    }
+
+    // --------------------------------------------------------
+    // Keep the already-derived plots.
+    //
+    // Example:
+    //
+    // bar a1,5
+    //
+    // Then the next sentential form begins:
+    //
+    // start bar a1,5 ; ...
+    // --------------------------------------------------------
+
+    var completed: [4096]u8 = undefined;
+    var completed_length: usize = 0;
+
+    for (graph.plots, 0..) |current_plot, index| {
+        const has_remaining =
+            index + 1 < graph.plots.len;
+
+        // ----------------------------------------------------
+        // For every plot after the first one, the current
+        // leftmost nonterminal is <plot_stmts>.
+        //
+        // Expand it first.
+        // ----------------------------------------------------
+
+        if (index > 0) {
+            var step_buffer: [4096]u8 = undefined;
+
+            if (has_remaining) {
+                const step = try std.fmt.bufPrint(
+                    &step_buffer,
+                    "start {s} ; <plot> ; <plot_stmts> end",
+                    .{
+                        completed[0..completed_length],
+                    },
+                );
+
+                try printStep(
+                    writer,
+                    step,
+                );
+            } else {
+                const step = try std.fmt.bufPrint(
+                    &step_buffer,
+                    "start {s} ; <plot> end",
+                    .{
+                        completed[0..completed_length],
+                    },
+                );
+
+                try printStep(
+                    writer,
+                    step,
+                );
+            }
+        }
+
+        // ----------------------------------------------------
+        // Now expand the new leftmost <plot>.
+        // ----------------------------------------------------
+
+        try displayPlotExpansion(
+            writer,
+            current_plot,
+            completed[0..completed_length],
+            has_remaining,
+        );
+
+        // ----------------------------------------------------
+        // Add this completed plot to the prefix.
+        // ----------------------------------------------------
+
+        completed_length = try appendCompletedPlot(
+            &completed,
+            completed_length,
+            current_plot,
+        );
+    }
 }
 
 // ============================================================
-// Derive the complete <plot_stmts> sequence.
-//
-// This function works from the token list and determines how
-// many plots are present.
-//
-// For multiple plots:
-//
-// <plot_stmts>
-// ⇒ <plot> ; <plot_stmts>
-//
-// For the final plot:
-//
-// <plot_stmts>
-// ⇒ <plot>
+// Expand one <plot> in the current sentential form.
 // ============================================================
 
-fn displayPlotStatements(
+fn displayPlotExpansion(
     writer: *std.Io.Writer,
-    tokens: []const lexer.Token,
+    current: plot.Plot,
+    completed: []const u8,
+    has_remaining: bool,
 ) !void {
-    var position: usize = 1;
+    var buffer: [4096]u8 = undefined;
 
-    while (position < tokens.len) {
-        if (tokens[position].kind == .end) {
-            break;
-        }
+    // --------------------------------------------------------
+    // Build the prefix.
+    //
+    // When there are already completed plots, the grammar
+    // requires:
+    //
+    // start <completed> ; <current plot> ...
+    //
+    // The semicolon belongs between the completed portion
+    // and the current plot.
+    // --------------------------------------------------------
 
-        // Find the end of the current plot.
-        const plot_end = findPlotEnd(
-            tokens,
-            position,
+    var prefix_buffer: [4096]u8 = undefined;
+
+    const prefix = if (completed.len == 0)
+        try std.fmt.bufPrint(
+            &prefix_buffer,
+            "start ",
+            .{},
+        )
+    else
+        try std.fmt.bufPrint(
+            &prefix_buffer,
+            "start {s} ; ",
+            .{completed},
         );
 
-        if (plot_end <= position) {
+    // The suffix represents everything that remains after the
+    // current <plot>.
+    const suffix =
+        if (has_remaining)
+            " ; <plot_stmts> end"
+        else
+            " end";
+
+    // --------------------------------------------------------
+    // BAR
+    //
+    // <plot> → bar <x><y>,<y>
+    // --------------------------------------------------------
+
+    if (current.kind == .bar) {
+        const coordinate = current.first_coordinate;
+
+        const width =
+            current.number orelse
+            return error.InvalidNumber;
+
+        var step = try std.fmt.bufPrint(
+            &buffer,
+            "{s}bar <x><y>,<y>{s}",
+            .{
+                prefix,
+                suffix,
+            },
+        );
+
+        try printStep(writer, step);
+
+        // Expand <x>.
+        step = try std.fmt.bufPrint(
+            &buffer,
+            "{s}bar {c}<y>,<y>{s}",
+            .{
+                prefix,
+                coordinate[0],
+                suffix,
+            },
+        );
+
+        try printStep(writer, step);
+
+        // Expand first <y>.
+        step = try std.fmt.bufPrint(
+            &buffer,
+            "{s}bar {c}{c},<y>{s}",
+            .{
+                prefix,
+                coordinate[0],
+                coordinate[1],
+                suffix,
+            },
+        );
+
+        try printStep(writer, step);
+
+        // Expand second <y>.
+        step = try std.fmt.bufPrint(
+            &buffer,
+            "{s}bar {c}{c},{d}{s}",
+            .{
+                prefix,
+                coordinate[0],
+                coordinate[1],
+                width,
+                suffix,
+            },
+        );
+
+        try printStep(writer, step);
+
+        return;
+    }
+
+    // --------------------------------------------------------
+    // LINE
+    //
+    // <plot> → line <x><y>,<x><y>
+    // --------------------------------------------------------
+
+    if (current.kind == .line) {
+        const first = current.first_coordinate;
+
+        const second =
+            current.second_coordinate orelse
+            return error.InvalidCoordinate;
+
+        var step = try std.fmt.bufPrint(
+            &buffer,
+            "{s}line <x><y>,<x><y>{s}",
+            .{
+                prefix,
+                suffix,
+            },
+        );
+
+        try printStep(writer, step);
+
+        // Expand first <x>.
+        step = try std.fmt.bufPrint(
+            &buffer,
+            "{s}line {c}<y>,<x><y>{s}",
+            .{
+                prefix,
+                first[0],
+                suffix,
+            },
+        );
+
+        try printStep(writer, step);
+
+        // Expand first <y>.
+        step = try std.fmt.bufPrint(
+            &buffer,
+            "{s}line {c}{c},<x><y>{s}",
+            .{
+                prefix,
+                first[0],
+                first[1],
+                suffix,
+            },
+        );
+
+        try printStep(writer, step);
+
+        // Expand second <x>.
+        step = try std.fmt.bufPrint(
+            &buffer,
+            "{s}line {c}{c},{c}<y>{s}",
+            .{
+                prefix,
+                first[0],
+                first[1],
+                second[0],
+                suffix,
+            },
+        );
+
+        try printStep(writer, step);
+
+        // Expand second <y>.
+        step = try std.fmt.bufPrint(
+            &buffer,
+            "{s}line {c}{c},{c}{c}{s}",
+            .{
+                prefix,
+                first[0],
+                first[1],
+                second[0],
+                second[1],
+                suffix,
+            },
+        );
+
+        try printStep(writer, step);
+
+        return;
+    }
+
+    // --------------------------------------------------------
+    // GRID
+    //
+    // <plot> → grid <x><y>
+    // --------------------------------------------------------
+
+    if (current.kind == .grid) {
+        const coordinate = current.first_coordinate;
+
+        var step = try std.fmt.bufPrint(
+            &buffer,
+            "{s}grid <x><y>{s}",
+            .{
+                prefix,
+                suffix,
+            },
+        );
+
+        try printStep(writer, step);
+
+        // Expand <x>.
+        step = try std.fmt.bufPrint(
+            &buffer,
+            "{s}grid {c}<y>{s}",
+            .{
+                prefix,
+                coordinate[0],
+                suffix,
+            },
+        );
+
+        try printStep(writer, step);
+
+        // Expand <y>.
+        step = try std.fmt.bufPrint(
+            &buffer,
+            "{s}grid {c}{c}{s}",
+            .{
+                prefix,
+                coordinate[0],
+                coordinate[1],
+                suffix,
+            },
+        );
+
+        try printStep(writer, step);
+
+        return;
+    }
+
+    // --------------------------------------------------------
+    // FILL
+    //
+    // <plot> → fill <x><y>
+    // --------------------------------------------------------
+
+    if (current.kind == .fill) {
+        const coordinate = current.first_coordinate;
+
+        var step = try std.fmt.bufPrint(
+            &buffer,
+            "{s}fill <x><y>{s}",
+            .{
+                prefix,
+                suffix,
+            },
+        );
+
+        try printStep(writer, step);
+
+        // Expand <x>.
+        step = try std.fmt.bufPrint(
+            &buffer,
+            "{s}fill {c}<y>{s}",
+            .{
+                prefix,
+                coordinate[0],
+                suffix,
+            },
+        );
+
+        try printStep(writer, step);
+
+        // Expand <y>.
+        step = try std.fmt.bufPrint(
+            &buffer,
+            "{s}fill {c}{c}{s}",
+            .{
+                prefix,
+                coordinate[0],
+                coordinate[1],
+                suffix,
+            },
+        );
+
+        try printStep(writer, step);
+
+        return;
+    }
+
+    return error.InvalidInput;
+}
+
+// ============================================================
+// Add a completed plot to the prefix.
+// ============================================================
+
+fn appendCompletedPlot(
+    buffer: []u8,
+    current_length: usize,
+    current: plot.Plot,
+) !usize {
+    var text_buffer: [256]u8 = undefined;
+
+    const text = switch (current.kind) {
+        .bar => blk: {
+            const width =
+                current.number orelse
+                return error.InvalidNumber;
+
+            break :blk try std.fmt.bufPrint(
+                &text_buffer,
+                "bar {c}{c},{d}",
+                .{
+                    current.first_coordinate[0],
+                    current.first_coordinate[1],
+                    width,
+                },
+            );
+        },
+
+        .line => blk: {
+            const second =
+                current.second_coordinate orelse
+                return error.InvalidCoordinate;
+
+            break :blk try std.fmt.bufPrint(
+                &text_buffer,
+                "line {c}{c},{c}{c}",
+                .{
+                    current.first_coordinate[0],
+                    current.first_coordinate[1],
+                    second[0],
+                    second[1],
+                },
+            );
+        },
+
+        .grid => try std.fmt.bufPrint(
+            &text_buffer,
+            "grid {c}{c}",
+            .{
+                current.first_coordinate[0],
+                current.first_coordinate[1],
+            },
+        ),
+
+        .fill => try std.fmt.bufPrint(
+            &text_buffer,
+            "fill {c}{c}",
+            .{
+                current.first_coordinate[0],
+                current.first_coordinate[1],
+            },
+        ),
+    };
+
+    var next_length = current_length;
+
+    // Add the semicolon between completed plots.
+    if (next_length > 0) {
+        if (next_length + 3 > buffer.len) {
             return error.InvalidInput;
         }
 
-        // Determine whether another plot follows.
-        const has_more_plots =
-            plot_end < tokens.len and
-            tokens[plot_end].kind == .semicolon;
+        buffer[next_length] = ' ';
+        buffer[next_length + 1] = ';';
+        buffer[next_length + 2] = ' ';
 
-        if (has_more_plots) {
-            try displayPlotWithRemainingStatements(
-                writer,
-                tokens[position..plot_end],
-                true,
-            );
-
-            try printStep(
-                writer,
-                "start <previous_plot> ; <plot_stmts> end",
-            );
-
-            position = plot_end + 1;
-        } else {
-            try displayPlotWithRemainingStatements(
-                writer,
-                tokens[position..plot_end],
-                false,
-            );
-
-            position = plot_end;
-        }
-    }
-}
-
-// ============================================================
-// Find where one plot ends.
-//
-// A plot ends at either:
-//   - a semicolon
-//   - the end token
-// ============================================================
-
-fn findPlotEnd(
-    tokens: []const lexer.Token,
-    start_position: usize,
-) usize {
-    var position = start_position;
-
-    while (position < tokens.len) {
-        if (tokens[position].kind == .semicolon or
-            tokens[position].kind == .end)
-        {
-            break;
-        }
-
-        position += 1;
+        next_length += 3;
     }
 
-    return position;
-}
-
-// ============================================================
-// Display the derivation for one plot.
-//
-// This function expands the leftmost plot completely.
-//
-// The surrounding <plot_stmts> is represented by the caller.
-// ============================================================
-
-fn displayPlotWithRemainingStatements(
-    writer: *std.Io.Writer,
-    plot_tokens: []const lexer.Token,
-    has_more_plots: bool,
-) !void {
-    if (plot_tokens.len == 0) {
+    if (next_length + text.len > buffer.len) {
         return error.InvalidInput;
     }
 
-    const plot_kind = plot_tokens[0].kind;
-
-    switch (plot_kind) {
-        .bar => {
-            if (plot_tokens.len != 4) {
-                return error.InvalidInput;
-            }
-
-            const coordinate =
-                plot_tokens[1].lexeme;
-
-            const width_text =
-                plot_tokens[3].lexeme;
-
-            if (width_text.len != 1) {
-                return error.InvalidNumber;
-            }
-
-            const width =
-                width_text[0] - '0';
-
-            try displayPlotStart(
-                writer,
-                "bar",
-                has_more_plots,
-            );
-
-            try displayBarExpansion(
-                writer,
-                coordinate,
-                width,
-                has_more_plots,
-            );
-        },
-
-        .line => {
-            if (plot_tokens.len != 4) {
-                return error.InvalidInput;
-            }
-
-            const first_coordinate =
-                plot_tokens[1].lexeme;
-
-            const second_coordinate =
-                plot_tokens[3].lexeme;
-
-            try displayPlotStart(
-                writer,
-                "line",
-                has_more_plots,
-            );
-
-            try displayLineExpansion(
-                writer,
-                first_coordinate,
-                second_coordinate,
-                has_more_plots,
-            );
-        },
-
-        .grid => {
-            if (plot_tokens.len != 2) {
-                return error.InvalidInput;
-            }
-
-            const coordinate =
-                plot_tokens[1].lexeme;
-
-            try displayPlotStart(
-                writer,
-                "grid",
-                has_more_plots,
-            );
-
-            try displaySimpleExpansion(
-                writer,
-                "grid",
-                coordinate,
-                has_more_plots,
-            );
-        },
-
-        .fill => {
-            if (plot_tokens.len != 2) {
-                return error.InvalidInput;
-            }
-
-            const coordinate =
-                plot_tokens[1].lexeme;
-
-            try displayPlotStart(
-                writer,
-                "fill",
-                has_more_plots,
-            );
-
-            try displaySimpleExpansion(
-                writer,
-                "fill",
-                coordinate,
-                has_more_plots,
-            );
-        },
-
-        else => {
-            return error.InvalidInput;
-        },
-    }
-}
-
-// ============================================================
-// Display the beginning of a plot derivation.
-// ============================================================
-
-fn displayPlotStart(
-    writer: *std.Io.Writer,
-    plot_name: []const u8,
-    has_more_plots: bool,
-) !void {
-    if (has_more_plots) {
-        try writer.print(
-            "⇒ start <plot> ; <plot_stmts> end\n",
-            .{},
-        );
-    } else {
-        try writer.print(
-            "⇒ start <plot> end\n",
-            .{},
-        );
-    }
-
-    if (has_more_plots) {
-        try writer.print(
-            "⇒ start {s} <plot_tail> ; <plot_stmts> end\n",
-            .{plot_name},
-        );
-    } else {
-        try writer.print(
-            "⇒ start {s} <plot_tail> end\n",
-            .{plot_name},
-        );
-    }
-}
-
-// ============================================================
-// BAR expansion.
-// ============================================================
-
-fn displayBarExpansion(
-    writer: *std.Io.Writer,
-    coordinate: []const u8,
-    width: u8,
-    has_more_plots: bool,
-) !void {
-    try validateCoordinate(coordinate);
-
-    if (width > 9) {
-        return error.InvalidNumber;
-    }
-
-    const x = coordinate[0];
-    const y = coordinate[1];
-
-    var buffer: [256]u8 = undefined;
-
-    if (has_more_plots) {
-        try printStep(
-            writer,
-            "start bar <x><y>,<y> ; <plot_stmts> end",
-        );
-
-        const step_x = try std.fmt.bufPrint(
-            &buffer,
-            "start bar {c}<y>,<y> ; <plot_stmts> end",
-            .{x},
-        );
-        try printStep(writer, step_x);
-
-        const step_y = try std.fmt.bufPrint(
-            &buffer,
-            "start bar {c}{c},<y> ; <plot_stmts> end",
-            .{ x, y },
-        );
-        try printStep(writer, step_y);
-
-        const final_step = try std.fmt.bufPrint(
-            &buffer,
-            "start bar {c}{c},{d} ; <plot_stmts> end",
-            .{ x, y, width },
-        );
-        try printStep(writer, final_step);
-    } else {
-        try printStep(
-            writer,
-            "start bar <x><y>,<y> end",
-        );
-
-        const step_x = try std.fmt.bufPrint(
-            &buffer,
-            "start bar {c}<y>,<y> end",
-            .{x},
-        );
-        try printStep(writer, step_x);
-
-        const step_y = try std.fmt.bufPrint(
-            &buffer,
-            "start bar {c}{c},<y> end",
-            .{ x, y },
-        );
-        try printStep(writer, step_y);
-
-        const final_step = try std.fmt.bufPrint(
-            &buffer,
-            "start bar {c}{c},{d} end",
-            .{ x, y, width },
-        );
-        try printStep(writer, final_step);
-    }
-}
-
-// ============================================================
-// LINE expansion.
-// ============================================================
-
-fn displayLineExpansion(
-    writer: *std.Io.Writer,
-    first_coordinate: []const u8,
-    second_coordinate: []const u8,
-    has_more_plots: bool,
-) !void {
-    try validateCoordinate(first_coordinate);
-    try validateCoordinate(second_coordinate);
-
-    const first_x = first_coordinate[0];
-    const first_y = first_coordinate[1];
-
-    const second_x = second_coordinate[0];
-    const second_y = second_coordinate[1];
-
-    var buffer: [256]u8 = undefined;
-
-    const suffix =
-        if (has_more_plots)
-            " ; <plot_stmts> end"
-        else
-            " end";
-
-    const step_1 = try std.fmt.bufPrint(
-        &buffer,
-        "start line <x><y>,<x><y>{s}",
-        .{suffix},
+    std.mem.copyForwards(
+        u8,
+        buffer[next_length .. next_length + text.len],
+        text,
     );
-    try printStep(writer, step_1);
 
-    const step_2 = try std.fmt.bufPrint(
-        &buffer,
-        "start line {c}<y>,<x><y>{s}",
-        .{ first_x, suffix },
-    );
-    try printStep(writer, step_2);
-
-    const step_3 = try std.fmt.bufPrint(
-        &buffer,
-        "start line {c}{c},<x><y>{s}",
-        .{ first_x, first_y, suffix },
-    );
-    try printStep(writer, step_3);
-
-    const step_4 = try std.fmt.bufPrint(
-        &buffer,
-        "start line {c}{c},{c}<y>{s}",
-        .{
-            first_x,
-            first_y,
-            second_x,
-            suffix,
-        },
-    );
-    try printStep(writer, step_4);
-
-    const final_step = try std.fmt.bufPrint(
-        &buffer,
-        "start line {c}{c},{c}{c}{s}",
-        .{
-            first_x,
-            first_y,
-            second_x,
-            second_y,
-            suffix,
-        },
-    );
-    try printStep(writer, final_step);
-}
-
-// ============================================================
-// GRID / FILL expansion.
-// ============================================================
-
-fn displaySimpleExpansion(
-    writer: *std.Io.Writer,
-    plot_name: []const u8,
-    coordinate: []const u8,
-    has_more_plots: bool,
-) !void {
-    try validateCoordinate(coordinate);
-
-    const x = coordinate[0];
-    const y = coordinate[1];
-
-    const suffix =
-        if (has_more_plots)
-            " ; <plot_stmts> end"
-        else
-            " end";
-
-    var buffer: [256]u8 = undefined;
-
-    const step_1 = try std.fmt.bufPrint(
-        &buffer,
-        "start {s} <x><y>{s}",
-        .{ plot_name, suffix },
-    );
-    try printStep(writer, step_1);
-
-    const step_2 = try std.fmt.bufPrint(
-        &buffer,
-        "start {s} {c}<y>{s}",
-        .{ plot_name, x, suffix },
-    );
-    try printStep(writer, step_2);
-
-    const final_step = try std.fmt.bufPrint(
-        &buffer,
-        "start {s} {c}{c}{s}",
-        .{ plot_name, x, y, suffix },
-    );
-    try printStep(writer, final_step);
-}
-
-// ============================================================
-// Existing individual BAR derivation.
-// ============================================================
-
-pub fn displayBarDerivation(
-    writer: *std.Io.Writer,
-    coordinate: []const u8,
-    width: u8,
-) !void {
-    try validateCoordinate(coordinate);
-
-    if (width > 9) {
-        return error.InvalidNumber;
-    }
-
-    const x = coordinate[0];
-    const y = coordinate[1];
-
-    try printStep(writer, "<graph>");
-    try printStep(writer, "start <plot_stmts> end");
-    try printStep(writer, "start <plot> end");
-    try printStep(writer, "start bar <x><y>,<y> end");
-
-    var step_buffer: [256]u8 = undefined;
-
-    const step_x = try std.fmt.bufPrint(
-        &step_buffer,
-        "start bar {c}<y>,<y> end",
-        .{x},
-    );
-    try printStep(writer, step_x);
-
-    const step_y = try std.fmt.bufPrint(
-        &step_buffer,
-        "start bar {c}{c},<y> end",
-        .{ x, y },
-    );
-    try printStep(writer, step_y);
-
-    const final_step = try std.fmt.bufPrint(
-        &step_buffer,
-        "start bar {c}{c},{d} end",
-        .{ x, y, width },
-    );
-    try printStep(writer, final_step);
-}
-
-// ============================================================
-// Existing individual LINE derivation.
-// ============================================================
-
-pub fn displayLineDerivation(
-    writer: *std.Io.Writer,
-    first_coordinate: []const u8,
-    second_coordinate: []const u8,
-) !void {
-    try validateCoordinate(first_coordinate);
-    try validateCoordinate(second_coordinate);
-
-    const first_x = first_coordinate[0];
-    const first_y = first_coordinate[1];
-
-    const second_x = second_coordinate[0];
-    const second_y = second_coordinate[1];
-
-    try printStep(writer, "<graph>");
-    try printStep(writer, "start <plot_stmts> end");
-    try printStep(writer, "start <plot> end");
-    try printStep(writer, "start line <x><y>,<x><y> end");
-
-    var step_buffer: [256]u8 = undefined;
-
-    const step_first_x = try std.fmt.bufPrint(
-        &step_buffer,
-        "start line {c}<y>,<x><y> end",
-        .{first_x},
-    );
-    try printStep(writer, step_first_x);
-
-    const step_first_y = try std.fmt.bufPrint(
-        &step_buffer,
-        "start line {c}{c},<x><y> end",
-        .{ first_x, first_y },
-    );
-    try printStep(writer, step_first_y);
-
-    const step_second_x = try std.fmt.bufPrint(
-        &step_buffer,
-        "start line {c}{c},{c}<y> end",
-        .{
-            first_x,
-            first_y,
-            second_x,
-        },
-    );
-    try printStep(writer, step_second_x);
-
-    const final_step = try std.fmt.bufPrint(
-        &step_buffer,
-        "start line {c}{c},{c}{c} end",
-        .{
-            first_x,
-            first_y,
-            second_x,
-            second_y,
-        },
-    );
-    try printStep(writer, final_step);
-}
-
-// ============================================================
-// Existing individual GRID derivation.
-// ============================================================
-
-pub fn displayGridDerivation(
-    writer: *std.Io.Writer,
-    coordinate: []const u8,
-) !void {
-    try validateCoordinate(coordinate);
-
-    const x = coordinate[0];
-    const y = coordinate[1];
-
-    try printStep(writer, "<graph>");
-    try printStep(writer, "start <plot_stmts> end");
-    try printStep(writer, "start <plot> end");
-    try printStep(writer, "start grid <x><y> end");
-
-    var step_buffer: [256]u8 = undefined;
-
-    const step_x = try std.fmt.bufPrint(
-        &step_buffer,
-        "start grid {c}<y> end",
-        .{x},
-    );
-    try printStep(writer, step_x);
-
-    const final_step = try std.fmt.bufPrint(
-        &step_buffer,
-        "start grid {c}{c} end",
-        .{ x, y },
-    );
-    try printStep(writer, final_step);
-}
-
-// ============================================================
-// Existing individual FILL derivation.
-// ============================================================
-
-pub fn displayFillDerivation(
-    writer: *std.Io.Writer,
-    coordinate: []const u8,
-) !void {
-    try validateCoordinate(coordinate);
-
-    const x = coordinate[0];
-    const y = coordinate[1];
-
-    try printStep(writer, "<graph>");
-    try printStep(writer, "start <plot_stmts> end");
-    try printStep(writer, "start <plot> end");
-    try printStep(writer, "start fill <x><y> end");
-
-    var step_buffer: [256]u8 = undefined;
-
-    const step_x = try std.fmt.bufPrint(
-        &step_buffer,
-        "start fill {c}<y> end",
-        .{x},
-    );
-    try printStep(writer, step_x);
-
-    const final_step = try std.fmt.bufPrint(
-        &step_buffer,
-        "start fill {c}{c} end",
-        .{ x, y },
-    );
-    try printStep(writer, final_step);
+    return next_length + text.len;
 }
 
 // ============================================================
@@ -716,7 +602,223 @@ fn printStep(
 }
 
 // ============================================================
-// TESTS
+// Individual BAR derivation.
+// ============================================================
+
+pub fn displayBarDerivation(
+    writer: *std.Io.Writer,
+    coordinate: []const u8,
+    width: u8,
+) !void {
+    try validateCoordinate(coordinate);
+
+    if (width > 9) {
+        return error.InvalidNumber;
+    }
+
+    const x = coordinate[0];
+    const y = coordinate[1];
+
+    try printStep(writer, "<graph>");
+    try printStep(writer, "start <plot_stmts> end");
+    try printStep(writer, "start <plot> end");
+    try printStep(writer, "start bar <x><y>,<y> end");
+
+    var buffer: [256]u8 = undefined;
+
+    const step_x = try std.fmt.bufPrint(
+        &buffer,
+        "start bar {c}<y>,<y> end",
+        .{x},
+    );
+
+    try printStep(writer, step_x);
+
+    const step_y = try std.fmt.bufPrint(
+        &buffer,
+        "start bar {c}{c},<y> end",
+        .{
+            x,
+            y,
+        },
+    );
+
+    try printStep(writer, step_y);
+
+    const final_step = try std.fmt.bufPrint(
+        &buffer,
+        "start bar {c}{c},{d} end",
+        .{
+            x,
+            y,
+            width,
+        },
+    );
+
+    try printStep(writer, final_step);
+}
+
+// ============================================================
+// Individual LINE derivation.
+// ============================================================
+
+pub fn displayLineDerivation(
+    writer: *std.Io.Writer,
+    first_coordinate: []const u8,
+    second_coordinate: []const u8,
+) !void {
+    try validateCoordinate(first_coordinate);
+    try validateCoordinate(second_coordinate);
+
+    const first_x = first_coordinate[0];
+    const first_y = first_coordinate[1];
+
+    const second_x = second_coordinate[0];
+    const second_y = second_coordinate[1];
+
+    try printStep(writer, "<graph>");
+    try printStep(writer, "start <plot_stmts> end");
+    try printStep(writer, "start <plot> end");
+    try printStep(
+        writer,
+        "start line <x><y>,<x><y> end",
+    );
+
+    var buffer: [256]u8 = undefined;
+
+    const step_first_x = try std.fmt.bufPrint(
+        &buffer,
+        "start line {c}<y>,<x><y> end",
+        .{first_x},
+    );
+
+    try printStep(writer, step_first_x);
+
+    const step_first_y = try std.fmt.bufPrint(
+        &buffer,
+        "start line {c}{c},<x><y> end",
+        .{
+            first_x,
+            first_y,
+        },
+    );
+
+    try printStep(writer, step_first_y);
+
+    const step_second_x = try std.fmt.bufPrint(
+        &buffer,
+        "start line {c}{c},{c}<y> end",
+        .{
+            first_x,
+            first_y,
+            second_x,
+        },
+    );
+
+    try printStep(writer, step_second_x);
+
+    const final_step = try std.fmt.bufPrint(
+        &buffer,
+        "start line {c}{c},{c}{c} end",
+        .{
+            first_x,
+            first_y,
+            second_x,
+            second_y,
+        },
+    );
+
+    try printStep(writer, final_step);
+}
+
+// ============================================================
+// Individual GRID derivation.
+// ============================================================
+
+pub fn displayGridDerivation(
+    writer: *std.Io.Writer,
+    coordinate: []const u8,
+) !void {
+    try validateCoordinate(coordinate);
+
+    const x = coordinate[0];
+    const y = coordinate[1];
+
+    try printStep(writer, "<graph>");
+    try printStep(writer, "start <plot_stmts> end");
+    try printStep(writer, "start <plot> end");
+    try printStep(
+        writer,
+        "start grid <x><y> end",
+    );
+
+    var buffer: [256]u8 = undefined;
+
+    const step_x = try std.fmt.bufPrint(
+        &buffer,
+        "start grid {c}<y> end",
+        .{x},
+    );
+
+    try printStep(writer, step_x);
+
+    const final_step = try std.fmt.bufPrint(
+        &buffer,
+        "start grid {c}{c} end",
+        .{
+            x,
+            y,
+        },
+    );
+
+    try printStep(writer, final_step);
+}
+
+// ============================================================
+// Individual FILL derivation.
+// ============================================================
+
+pub fn displayFillDerivation(
+    writer: *std.Io.Writer,
+    coordinate: []const u8,
+) !void {
+    try validateCoordinate(coordinate);
+
+    const x = coordinate[0];
+    const y = coordinate[1];
+
+    try printStep(writer, "<graph>");
+    try printStep(writer, "start <plot_stmts> end");
+    try printStep(writer, "start <plot> end");
+    try printStep(
+        writer,
+        "start fill <x><y> end",
+    );
+
+    var buffer: [256]u8 = undefined;
+
+    const step_x = try std.fmt.bufPrint(
+        &buffer,
+        "start fill {c}<y> end",
+        .{x},
+    );
+
+    try printStep(writer, step_x);
+
+    const final_step = try std.fmt.bufPrint(
+        &buffer,
+        "start fill {c}{c} end",
+        .{
+            x,
+            y,
+        },
+    );
+
+    try printStep(writer, final_step);
+}
+
+// ============================================================
+// Tests
 // ============================================================
 
 test "display bar derivation" {
@@ -941,5 +1043,143 @@ test "reject invalid bar number" {
             "a1",
             10,
         ),
+    );
+}
+
+test "display graph derivation for two plots" {
+    const input =
+        "start bar a1,5;grid c4 end";
+
+    var tokens: [30]lexer.Token = undefined;
+
+    const token_count = try lexer.tokenize(
+        input,
+        &tokens,
+    );
+
+    var output_buffer: [4096]u8 = undefined;
+
+    var writer = std.Io.Writer.fixed(
+        &output_buffer,
+    );
+
+    try displayGraphDerivation(
+        &writer,
+        tokens[0..token_count],
+    );
+
+    const output = output_buffer[0..writer.end];
+
+    try std.testing.expect(
+        std.mem.indexOf(
+            u8,
+            output,
+            "start <plot> ; <plot_stmts> end",
+        ) != null,
+    );
+
+    try std.testing.expect(
+        std.mem.indexOf(
+            u8,
+            output,
+            "start bar <x><y>,<y> ; <plot_stmts> end",
+        ) != null,
+    );
+
+    try std.testing.expect(
+        std.mem.indexOf(
+            u8,
+            output,
+            "start bar a1,5 ; <plot_stmts> end",
+        ) != null,
+    );
+
+    try std.testing.expect(
+        std.mem.indexOf(
+            u8,
+            output,
+            "start bar a1,5 ; <plot> end",
+        ) != null,
+    );
+
+    try std.testing.expect(
+        std.mem.indexOf(
+            u8,
+            output,
+            "start bar a1,5 ; grid <x><y> end",
+        ) != null,
+    );
+
+    try std.testing.expect(
+        std.mem.indexOf(
+            u8,
+            output,
+            "start bar a1,5 ; grid c4 end",
+        ) != null,
+    );
+}
+
+test "display graph derivation for mixed plots" {
+    const input =
+        "start line b2,c3;fill e5;bar f6,2 end";
+
+    var tokens: [40]lexer.Token = undefined;
+
+    const token_count = try lexer.tokenize(
+        input,
+        &tokens,
+    );
+
+    var output_buffer: [4096]u8 = undefined;
+
+    var writer = std.Io.Writer.fixed(
+        &output_buffer,
+    );
+
+    try displayGraphDerivation(
+        &writer,
+        tokens[0..token_count],
+    );
+
+    const output = output_buffer[0..writer.end];
+
+    try std.testing.expect(
+        std.mem.indexOf(
+            u8,
+            output,
+            "start line b2,c3 ; <plot_stmts> end",
+        ) != null,
+    );
+
+    try std.testing.expect(
+        std.mem.indexOf(
+            u8,
+            output,
+            "start line b2,c3 ; fill <x><y> ; <plot_stmts> end",
+        ) != null,
+    );
+
+    try std.testing.expect(
+        std.mem.indexOf(
+            u8,
+            output,
+            "start line b2,c3 ; fill e5 ; <plot_stmts> end",
+        ) != null,
+    );
+
+    try std.testing.expect(
+        std.mem.indexOf(
+            u8,
+            output,
+            "start line b2,c3 ; fill e5 ; bar <x><y>,<y> end",
+        ) != null,
+    );
+
+    try std.testing.expect(
+        std.mem.indexOf(
+            u8,
+            output,
+            "start line b2,c3 ; fill e5 ; bar f6,2 end",
+        ) != null,
     );
 }
