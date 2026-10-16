@@ -1,14 +1,15 @@
-# CMPS3111 Project 2 — Raylib Graphics (Point Fill)
+# CMPS3111 Project 2 — Full Raylib Graphics
 
-**Branch:** `raylib-graphics`  
-**Implementation:** Zig 0.16.0 and Raylib  
+**Branch:** `raylib-full-graphics`  
+**Language:** Zig 0.16.0  
+**Presentation platform:** Ubuntu Linux  
 **Group:** Group 4
 
 ## Overview
 
-This branch implements a BNF-based plotting language. The application reads a plotting statement, validates its syntax, displays a leftmost derivation, optionally prints a connected parse tree in the terminal, and optionally opens a Raylib window to display the plots. Closing the graphics window returns control to the application rather than ending the input loop.
+This version implements a small BNF-based graph-command interpreter. It validates user input, prints a leftmost derivation in the terminal, optionally opens a **Raylib graphical parse-tree viewer**, and optionally opens a **separate Raylib graphical-output window**. Closing either graphical window returns control to the terminal; uppercase `STOP` ends the input loop.
 
-**The distinguishing behavior of this branch is point-based FILL:** `fill c2` draws a small green square centered on the intersection of column `c` and row `2`. This differs from the `raylib-fill-cell` branch, which colors a complete grid cell and uses cell-centered labels.
+This branch builds on the completed `raylib-graphics` (point-fill) version. The original BAR, LINE, GRID, and point-based FILL behavior is retained.
 
 ## BNF Grammar
 
@@ -27,143 +28,166 @@ This branch implements a BNF-based plotting language. The application reads a pl
 <y> → 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
 ```
 
-A valid input starts with `start`, contains one or more plot commands separated by semicolons, and ends with `end`.
-
-## Graphical Commands
-
-| Command | Example | Expected display |
-|---|---|---|
-| BAR | `bar b4,2` | A thick blue, unfilled outline starting at column `b`, reaching height `4`, and spanning width `2` grid intervals. No interior blue divider. |
-| LINE | `line a1,f6` | A red line joining the exact coordinate intersections `a1` and `f6`, with endpoint markers. |
-| FILL | `fill c2` | A green square smaller than one grid cell, centered at the `c2` intersection. |
-| GRID | `grid e5` | A black coordinate grid extending through `e` horizontally and `5` vertically, preserving the original grid behavior. |
-
-### Coordinate labels
-
-In **this point-fill branch**, all four commands use grid-line coordinates:
-
-- X-axis letters are centered **under their corresponding vertical grid lines**, not between lines.
-- Y-axis numbers align **with their corresponding horizontal grid lines**, not between lines.
-- FILL's square is centered at the intersection, rather than centered inside a cell.
-
-### Titles and panel layout
-
-Each plot has a title showing the exact input and its sequence number, for example:
-
-```text
-BAR b4,2 - Graph 1
-LINE a1,f6 - Graph 2
-FILL c2 - Graph 3
-GRID e5 - Graph 4
-```
-
-Plots are displayed in the order entered, with multiple panels arranged in the Raylib window.
+The grammar supports one or more plot statements separated by semicolons. The coordinate syntax uses a lowercase letter from `a` to `j` followed by one digit from `0` to `9`.
 
 ## Requirements
 
-- Zig **0.16.0** (the version used on the Ubuntu development laptop)
-- Raylib dependency as configured in the project
-- Ubuntu Linux graphical desktop, or another compatible build environment
-- A UTF-8 terminal for the derivation and parse-tree symbols
-
-On the Ubuntu development laptop, Zig 0.16.0 is installed at `/opt/zig/zig`. The `zig` executable selected by VS Code may be a different version, so use the explicit path below.
+- Ubuntu Linux with a working desktop graphical session (X11 and OpenGL support for Raylib)
+- Zig **0.16.0** (tested installation path: `/opt/zig/zig`)
+- The project's Zig build files and existing Raylib Zig dependency
+- Recommended font: DejaVu Sans (`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`); the viewer includes a fallback font path
 
 ## Build and Run
 
-Open a terminal in the repository directory:
+From the repository root:
 
 ```bash
-cd ~/Desktop/CMPS3111_Project2
-git switch raylib-graphics
 /opt/zig/zig version
 /opt/zig/zig build
 /opt/zig/zig build run
 ```
 
-The version command should report `0.16.0`. A successful build may produce no terminal output.
+The version command should print `0.16.0`. A successful build may finish without any messages.
 
-## Example Session
+## Program Workflow
 
-Enter this input at the program prompt:
+1. Display the BNF grammar and request an input sentence in the terminal.
+2. Validate and parse the sentence. Invalid input produces diagnostics rather than a plot.
+3. Display the leftmost derivation for a valid sentence.
+4. Ask `Display parse tree? (yes/no):`. Answer `y` to open the **first Raylib window**.
+5. Inspect the graphical parse tree, then close its window to return to the terminal.
+6. Ask `Display graphical output? (yes/no):`. Answer `y` to open the **second Raylib window**.
+7. Inspect the plot panels, then close the window to return to the program loop.
+8. Enter uppercase `STOP` at the input prompt to terminate normally.
+
+The two graphical windows open **sequentially**, not simultaneously. Selecting `no` skips the corresponding window without ending the program.
+
+## Leftmost Derivation
+
+The terminal derivation starts with `<graph>` and shows successive **leftmost** nonterminal expansions using `⇒` and vertical progression arrows `↓`. The repeated `<graph>` at the left of displayed steps is a visual reference label, not an additional grammar expansion.
+
+Example input:
+
+```text
+start line a1,f6 end
+```
+
+## Window 1 — Graphical BNF Parse Tree
+
+The first Raylib window shows a connected, top-down parse tree with the correct grammar structure:
+
+- `<graph>` expands into `start`, `<plot_stmts>`, and `end`.
+- Each `<plot_stmts>` expands to `<plot>` or `<plot> ; <plot_stmts>`.
+- Each `<plot>` expands into its command terminal and the corresponding coordinate nonterminals, punctuation, and terminal values.
+- `<x>` and `<y>` appear as separate nonterminal nodes above their actual letter or digit values.
+
+### Viewer Interface
+
+The viewer uses color-coded rounded nodes, connecting lines, a legend, an input-string panel, and a parsed-structure summary. Its typography uses a TrueType font when available for better readability. The layout is intended to remain navigable for longer recursive parse trees.
+
+### Controls
+
+| Action | Control |
+|---|---|
+| Zoom tree | Mouse wheel while hovering over the tree area |
+| Pan tree | Left-click and drag inside the tree area |
+| Reset view | `R` |
+| Fullscreen toggle | `F11` |
+| Resize / maximize / minimize | Standard Ubuntu window controls |
+| Close viewer | Window `X` button |
+
+Closing this window returns to the terminal; it does **not** terminate the application.
+
+## Window 2 — Graphical Plot Output
+
+The second Raylib window displays plot panels in input order. Each panel title includes its graph number, command type, and exact command arguments.
+
+| Command | Example | Graphical behavior |
+|---|---|---|
+| BAR | `bar b4,2` | Thick blue, unfilled bar outline starting at `b`, height `4`, width `2` grid intervals |
+| LINE | `line a1,f6` | Red line connecting the exact `a1` and `f6` grid intersections |
+| GRID | `grid e5` | Black grid retaining the original width-to-`e` and height-to-`5` behavior |
+| FILL | `fill c2` | Green square, smaller than a grid cell, centered on the exact `c2` intersection |
+
+**Coordinate labeling:** This branch uses grid-line-aligned X and Y labels for all four plot types, including point-based FILL. The separate `raylib-fill-cell` branch instead fills an entire cell and centers FILL's labels within cells.
+
+## Sample Inputs
+
+Single commands:
+
+```text
+start bar b4,2 end
+start line a1,f6 end
+start grid e5 end
+start fill c2 end
+```
+
+Multiple commands:
 
 ```text
 start bar b4,2;line a1,f6;fill c2;grid e5 end
 ```
 
-The program displays the leftmost derivation, then asks whether to show the parse tree and graphical output. Answer `y` to each prompt to inspect both. Close the Raylib window to return to the terminal flow. Continue testing additional inputs; enter uppercase `STOP` to terminate the program normally.
-
-### Leftmost derivation and parse tree
-
-- The leftmost derivation progresses downward using `↓` and `⇒`. A repeated `<graph>` at the left serves as a visual reference label.
-- The parse tree is printed in the terminal with connected parent-child branches.
-- Multiple plot commands use the recursive `<plot_stmts> → <plot> ; <plot_stmts>` production.
-
-## Project Structure
+A longer recursive input:
 
 ```text
-CMPS3111_Project2/
-├── .gitignore
-├── README.md
-├── build.zig
-├── build.zig.zon
-├── src/
-│   ├── main.zig
-│   ├── grammar.zig
-│   ├── lexer.zig
-│   ├── parser.zig
-│   ├── derivation.zig
-│   ├── parse_tree.zig
-│   ├── plot.zig
-│   └── graphics.zig
-└── tests/
+start fill a0;fill b1;fill c2;fill d3;fill e4;fill f5;fill g6;fill h7;fill j9 end
 ```
 
-| File | Purpose |
+Try invalid commands and coordinates as part of testing, such as `start banana a1 end`, `start line a1,f6`, or `start fill z2 end`.
+
+## Source Organization
+
+| File | Role |
 |---|---|
-| `main.zig` | Program input and output loop |
-| `grammar.zig` | Displays BNF rules |
-| `lexer.zig` | Tokenizes input |
-| `parser.zig` | Validates grammar and parses commands |
-| `derivation.zig` | Prints leftmost derivation |
-| `parse_tree.zig` | Prints the terminal parse tree |
-| `plot.zig` | Graph and plot data types |
-| `graphics.zig` | Raylib window, panels, grid lines, plot rendering and point-fill marker |
+| `src/main.zig` | Terminal input loop, prompts, validation flow, and opening the two windows |
+| `src/grammar.zig` | BNF grammar display |
+| `src/lexer.zig` | Lexical processing |
+| `src/parser.zig` | Parsing and syntax validation |
+| `src/derivation.zig` | Leftmost derivation |
+| `src/parse_tree.zig` | Terminal parse-tree logic retained from earlier implementations |
+| `src/parse_tree_graphics.zig` | Graphical parse-tree viewer, node layout, font, zoom, and pan |
+| `src/graphics.zig` | Raylib graphical plot output |
+| `src/plot.zig` | Plot and Graph data structures |
 
-## Testing Checklist
+The repository also includes `build.zig` and `build.zig.zon` for building and dependencies.
 
-- [ ] Build using Zig 0.16.0
-- [ ] Test BAR width and height, including no internal blue divider
-- [ ] Test LINE endpoints at exact grid intersections
-- [ ] Test FILL point marker at `c2` (not a whole cell)
-- [ ] Test FILL at edge coordinates such as `a0` and `j9`
-- [ ] Test GRID dimensions using `grid e5`
-- [ ] Verify X and Y labels align with grid lines on every plot
-- [ ] Verify each graph title reproduces the correct command and sequence number
-- [ ] Test multiple plot commands in one input
-- [ ] Verify parse tree and derivation
-- [ ] Verify closing the Raylib window returns to the input loop
-- [ ] Verify uppercase `STOP` exits normally
+## Presentation Testing Checklist
 
-The checklist is for final rehearsal and fresh checkouts; checking an item requires actually running that test.
+- [ ] Compile successfully with `/opt/zig/zig build`
+- [ ] Test a single plot and multiple recursive plots
+- [ ] Verify the leftmost derivation
+- [ ] Verify all parse-tree grammar symbols and parent-child connections
+- [ ] Check the font and compact tree layout
+- [ ] Test mouse zoom, panning, reset, maximize, and F11 fullscreen
+- [ ] Close the parse-tree window and confirm the graphical-output question appears
+- [ ] Verify BAR, LINE, GRID, and point-based FILL render correctly
+- [ ] Close the graphical-output window and confirm the terminal loop continues
+- [ ] Confirm uppercase `STOP` terminates normally
 
-## Git and Branch Comparison
+## Git Branches
 
-Generated Zig cache and build output should be excluded from Git tracking:
+| Branch | Purpose |
+|---|---|
+| `terminal-graphics` | Terminal-only backup implementation |
+| `raylib-fill-cell` | Raylib output with full-cell FILL |
+| `raylib-graphics` | Raylib output with point-based FILL and terminal parse tree |
+| `raylib-full-graphics` | This version: graphical parse tree and separate graphical plot window |
+| `main` | Final selection pending group and lecturer review |
+
+## Build Artifacts
+
+`.gitignore` excludes generated Zig build output:
 
 ```gitignore
 .zig-cache/
 zig-out/
 ```
 
-| Branch | Main distinction |
-|---|---|
-| `terminal-graphics` | Terminal-based graphics output |
-| `raylib-graphics` | **This branch:** Raylib graphics with point-based FILL |
-| `raylib-fill-cell` | Raylib graphics with full-cell FILL and cell-centered labels |
-| `raylib-full-graphics` | Planned separate graphical parse-tree and plot windows |
+These directories are regenerated during compilation and should not be committed. Keep source files, build scripts, and dependency information in version control.
 
-The group and lecturer will review the alternatives before choosing which version to merge into `main`.
+---
 
-## Submission Notes
-
-This README describes the **point-fill Raylib implementation only**. Reports and presentation slides should match the final selected branch and its verified behavior.
+**CMPS3111 Project 2 — Group 4**  
+**Implementation:** Full Raylib graphical parse tree + point-fill plot renderer  
+**Branch:** `raylib-full-graphics`
