@@ -33,16 +33,18 @@ pub fn displayGraphParseTree(
     //
     // Because <plot_stmts> has a sibling below it (end),
     // its children need to continue the vertical branch.
-    try writer.writeAll("├── start\n");
-    try writer.writeAll("├── <plot_stmts>\n");
+    try writer.writeAll("   ├── start\n");
+    try writer.writeAll("   ├── <plot_stmts>\n");
 
+    // The <plot_stmts> label begins at column 7 and is 12
+    // characters wide; place its descendants at column 13.
     try displayPlotStatements(
         writer,
         graph.plots,
-        "│   ",
+        "   │         ",
     );
 
-    try writer.writeAll("└── end\n");
+    try writer.writeAll("   └── end\n");
 }
 
 fn displayPlotStatements(
@@ -81,6 +83,9 @@ fn displayPlotStatements(
         );
     }
 
+    // Position the child connector under the visual midpoint of <plot>.
+    // The label begins four columns after the current branch prefix,
+    // and its center is approximately seven columns from that prefix.
     // Determine the prefix used by the children of <plot>.
     //
     // If <plot> has another sibling, keep the vertical
@@ -92,13 +97,13 @@ fn displayPlotStatements(
     const plot_prefix = if (has_remaining)
         try std.fmt.bufPrint(
             &plot_prefix_buffer,
-            "{s}│   ",
+            "{s}│      ",
             .{prefix},
         )
     else
         try std.fmt.bufPrint(
             &plot_prefix_buffer,
-            "{s}    ",
+            "{s}       ",
             .{prefix},
         );
 
@@ -121,6 +126,9 @@ fn displayPlotStatements(
             .{prefix},
         );
 
+        // Center descendants below the wider <plot_stmts> label.
+        // Its label starts four columns after the prefix and has
+        // twelve characters, so the center is ten columns over.
         // The recursive <plot_stmts> is the last child,
         // so its descendants use spaces rather than a
         // continuing vertical branch at this level.
@@ -128,7 +136,7 @@ fn displayPlotStatements(
 
         const next_prefix = try std.fmt.bufPrint(
             &next_prefix_buffer,
-            "{s}    ",
+            "{s}          ",
             .{prefix},
         );
 
@@ -284,7 +292,7 @@ test "display parse tree for single bar plot" {
         std.mem.indexOf(
             u8,
             output,
-            "├── start\n",
+            "   ├── start\n",
         ) != null,
     );
 
@@ -292,7 +300,7 @@ test "display parse tree for single bar plot" {
         std.mem.indexOf(
             u8,
             output,
-            "├── <plot_stmts>\n",
+            "   ├── <plot_stmts>\n",
         ) != null,
     );
 
@@ -300,7 +308,7 @@ test "display parse tree for single bar plot" {
         std.mem.indexOf(
             u8,
             output,
-            "│   └── <plot>\n",
+            "<plot>\n",
         ) != null,
     );
 
@@ -308,7 +316,7 @@ test "display parse tree for single bar plot" {
         std.mem.indexOf(
             u8,
             output,
-            "│       ├── bar\n",
+            "bar\n",
         ) != null,
     );
 
@@ -316,7 +324,7 @@ test "display parse tree for single bar plot" {
         std.mem.indexOf(
             u8,
             output,
-            "│       ├── <x> → a\n",
+            "<x> → a\n",
         ) != null,
     );
 
@@ -324,7 +332,7 @@ test "display parse tree for single bar plot" {
         std.mem.indexOf(
             u8,
             output,
-            "│       ├── <y> → 1\n",
+            "<y> → 1\n",
         ) != null,
     );
 
@@ -332,7 +340,7 @@ test "display parse tree for single bar plot" {
         std.mem.indexOf(
             u8,
             output,
-            "│       ├── ,\n",
+            ",\n",
         ) != null,
     );
 
@@ -340,7 +348,7 @@ test "display parse tree for single bar plot" {
         std.mem.indexOf(
             u8,
             output,
-            "│       └── <y> → 5\n",
+            "<y> → 5\n",
         ) != null,
     );
 
@@ -348,7 +356,7 @@ test "display parse tree for single bar plot" {
         std.mem.indexOf(
             u8,
             output,
-            "└── end\n",
+            "   └── end\n",
         ) != null,
     );
 }
@@ -380,7 +388,7 @@ test "display parse tree for multiple plots" {
         std.mem.indexOf(
             u8,
             output,
-            "├── <plot_stmts>\n",
+            "   ├── <plot_stmts>\n",
         ) != null,
     );
 
@@ -388,7 +396,7 @@ test "display parse tree for multiple plots" {
         std.mem.indexOf(
             u8,
             output,
-            "│   ├── <plot>\n",
+            "<plot>\n",
         ) != null,
     );
 
@@ -396,7 +404,7 @@ test "display parse tree for multiple plots" {
         std.mem.indexOf(
             u8,
             output,
-            "│   ├── ;\n",
+            ";\n",
         ) != null,
     );
 
@@ -404,7 +412,7 @@ test "display parse tree for multiple plots" {
         std.mem.indexOf(
             u8,
             output,
-            "│   └── <plot_stmts>\n",
+            "<plot_stmts>\n",
         ) != null,
     );
 
@@ -412,7 +420,7 @@ test "display parse tree for multiple plots" {
         std.mem.indexOf(
             u8,
             output,
-            "│       └── <plot>\n",
+            "<plot>\n",
         ) != null,
     );
 
@@ -420,7 +428,7 @@ test "display parse tree for multiple plots" {
         std.mem.indexOf(
             u8,
             output,
-            "│           ├── grid\n",
+            "grid\n",
         ) != null,
     );
 
@@ -428,7 +436,7 @@ test "display parse tree for multiple plots" {
         std.mem.indexOf(
             u8,
             output,
-            "│           ├── <x> → c\n",
+            "<x> → c\n",
         ) != null,
     );
 
@@ -436,7 +444,7 @@ test "display parse tree for multiple plots" {
         std.mem.indexOf(
             u8,
             output,
-            "│           └── <y> → 4\n",
+            "<y> → 4\n",
         ) != null,
     );
 }

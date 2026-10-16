@@ -595,10 +595,14 @@ fn printStep(
     writer: *std.Io.Writer,
     text: []const u8,
 ) !void {
-    try writer.print(
-        "⇒ {s}\n",
-        .{text},
-    );
+    if (std.mem.eql(u8, text, "<graph>")) {
+        try writer.writeAll("<graph>\n");
+    } else {
+        // <graph> is a reference label, not an additional
+        // nonterminal in the sentential form.
+        try writer.writeAll("   ↓\n");
+        try writer.print("<graph> ⇒ {s}\n", .{text});
+    }
 }
 
 // ============================================================
