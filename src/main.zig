@@ -3,7 +3,7 @@ const grammar = @import("grammar.zig");
 const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
 const derivation = @import("derivation.zig");
-const parse_tree = @import("parse_tree.zig");
+const parse_tree_graphics = @import("parse_tree_graphics.zig");
 const graphics = @import("graphics.zig");
 const plot = @import("plot.zig");
 
@@ -268,45 +268,23 @@ pub fn main(init: std.process.Init) !void {
                 "\nDisplay parse tree? (yes/no): ",
             );
 
-        // ----------------------------------------------------
-        // PARSE TREE
-        // ----------------------------------------------------
-
-        if (show_tree) {
-            try stdout.writeAll(
-                "\nPARSE TREE\n",
-            );
-
-            try stdout.writeAll(
-                "----------------------------------------\n",
-            );
-
-            parse_tree.displayGraphParseTree(
-                stdout,
-                tokens[0..token_count],
-            ) catch |err| {
-                try stdout.print(
-                    "\nPARSE TREE ERROR: {s}\n\n",
-                    .{@errorName(err)},
-                );
-
-                try stdout.flush();
-
-                try pauseBeforeNextRun(
-                    stdin,
-                    stdout,
-                );
-
-                try clearTerminal(stdout);
-
-                continue;
-            };
-
-            try stdout.writeAll(
-                "----------------------------------------\n",
-            );
-
+        // Construct the already-validated graph for both Raylib windows.
+        // This uses the same parser and plot representation as before.
+        var plots: [100]plot.Plot = undefined;
+        var graphics_parser = parser.Parser.init(tokens[0..token_count]);
+        const graph = graphics_parser.parseGraphInto(&plots) catch |err| {
+            try stdout.print("\nGRAPH DATA ERROR: {s}\n\n", .{@errorName(err)});
             try stdout.flush();
+            try pauseBeforeNextRun(stdin, stdout);
+            try clearTerminal(stdout);
+            continue;
+        };
+
+        // Window 1: graphical parse tree. Closing it returns here.
+        if (show_tree) {
+            try stdout.writeAll("\nPARSE TREE\nClose the parse-tree window to continue.\n");
+            try stdout.flush();
+            parse_tree_graphics.displayGraphParseTree(graph);
         }
 
         // ----------------------------------------------------
@@ -319,37 +297,6 @@ pub fn main(init: std.process.Init) !void {
                 stdout,
                 "\nDisplay graphical output? (yes/no): ",
             );
-
-        // ----------------------------------------------------
-        // Build actual Graph representation.
-        // ----------------------------------------------------
-
-        var plots: [100]plot.Plot = undefined;
-
-        var graphics_parser = parser.Parser.init(
-            tokens[0..token_count],
-        );
-
-        const graph =
-            graphics_parser.parseGraphInto(
-                &plots,
-            ) catch |err| {
-                try stdout.print(
-                    "\nGRAPH DATA ERROR: {s}\n\n",
-                    .{@errorName(err)},
-                );
-
-                try stdout.flush();
-
-                try pauseBeforeNextRun(
-                    stdin,
-                    stdout,
-                );
-
-                try clearTerminal(stdout);
-
-                continue;
-            };
 
         // ----------------------------------------------------
         // RAYLIB GRAPHICAL OUTPUT
