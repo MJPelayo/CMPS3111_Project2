@@ -1,0 +1,5 @@
+# Zig build cache
+.zig-cache/
+
+# Compiled build output
+zig-out/
