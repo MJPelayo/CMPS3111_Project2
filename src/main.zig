@@ -438,12 +438,17 @@ fn pauseBeforeNextRun(
     stdout: *std.Io.Writer,
 ) !void {
     try stdout.writeAll(
-        "\nPress Enter to continue...",
+        "\nPress Enter to continue... ",
     );
 
     try stdout.flush();
 
-    _ = try stdin.takeByte();
+    // Consume the entire acknowledgement line, not a single byte.
+    // A byte-wise pause can eat the first character of the next command
+    // or leave part of a Windows CRLF sequence buffered.
+    _ = try stdin.takeDelimiter('\n') orelse return;
+    try stdout.writeAll("\n");
+    try stdout.flush();
 }
 
 // ============================================================
