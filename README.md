@@ -1,169 +1,177 @@
-# CMPS3111 Project 2 — Raylib Graphics (Point Fill)
+# CMPS3111 Programming Project 2 — BNF Graph Interpreter
 
-**Branch:** `raylib-graphics`  
-**Implementation:** Zig 0.16.0 and Raylib  
-**Group:** Group 4
+**Final implementation:** `raylib-graphics` (terminal derivation and parse tree; Raylib graphical plots)  
+**Course:** CMPS3111 Programming Languages  
+**Compiler:** Zig **0.16.0**  
+**Graphics:** Raylib 6.0.0 via `raylib-zig` 6.0.0  
+**Platforms tested:** Ubuntu 24.04 and Windows 11  
+**Submission deadline:** Thursday, 22 October 2026, before class (see official assignment).
 
-## Overview
+## 1. What the program does
 
-This branch implements a BNF-based plotting language. The application reads a plotting statement, validates its syntax, displays a leftmost derivation, optionally prints a connected parse tree in the terminal, and optionally opens a Raylib window to display the plots. Closing the graphics window returns control to the application rather than ending the input loop.
+The interpreter displays the BNF grammar, reads a proposed sentence, validates its lexical and syntactic structure, and displays a **leftmost derivation**. For valid sentences, it can show a **terminal parse tree** and a **Raylib graphical output window**. For invalid sentences, it displays relevant errors and waits for **one Enter** before returning to the input prompt. Type uppercase `STOP` at the input prompt to terminate normally. Closing the graphics window returns control to the program.
 
-**The distinguishing behavior of this branch is point-based FILL:** `fill c2` draws a small green square centered on the intersection of column `c` and row `2`. This differs from the `raylib-fill-cell` branch, which colors a complete grid cell and uses cell-centered labels.
+**Selected FILL interpretation:** `fill c2` draws a **small filled green square centered at the coordinate intersection** `c2`, not a full-cell fill. This is the selected project's implementation of the assignment's less-specific “fill area starting at point” wording.
 
-## BNF Grammar
+## 2. BNF grammar
 
 ```text
 <graph> → start <plot_stmts> end
-
-<plot_stmts> → <plot>
-             | <plot> ; <plot_stmts>
-
+<plot_stmts> → <plot> | <plot> ; <plot_stmts>
 <plot> → bar <x><y>,<y>
-        | line <x><y>,<x><y>
-        | grid <x><y>
-        | fill <x><y>
-
+       | line <x><y>,<x><y>
+       | grid <x><y>
+       | fill <x><y>
 <x> → a | b | c | d | e | f | g | h | i | j
 <y> → 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
 ```
 
-A valid input starts with `start`, contains one or more plot commands separated by semicolons, and ends with `end`.
+- `bar b4,2`: blue, unfilled bar outline, left top at `b4`, bottom at y=0, width 2 grid units.
+- `line a1,f6`: red line between the two coordinate intersections.
+- `grid e5`: black grid with axes extending through the specified coordinate range.
+- `fill c2`: green filled point marker centered on the `c2` intersection.
 
-## Graphical Commands
+The input may contain multiple plot commands separated by semicolons.
 
-| Command | Example | Expected display |
-|---|---|---|
-| BAR | `bar b4,2` | A thick blue, unfilled outline starting at column `b`, reaching height `4`, and spanning width `2` grid intervals. No interior blue divider. |
-| LINE | `line a1,f6` | A red line joining the exact coordinate intersections `a1` and `f6`, with endpoint markers. |
-| FILL | `fill c2` | A green square smaller than one grid cell, centered at the `c2` intersection. |
-| GRID | `grid e5` | A black coordinate grid extending through `e` horizontally and `5` vertically, preserving the original grid behavior. |
+## 3. Files and dependency management
 
-### Coordinate labels
+| File or directory | Purpose |
+| --- | --- |
+| `src/main.zig` | Input loop, BNF display, error handling and orchestration |
+| `src/` (other `.zig` files) | Lexer, parsing, derivation, terminal parse tree, plotting and graphics modules |
+| `build.zig` | Zig executable, Raylib module import, build and run steps |
+| `build.zig.zon` | Dependency manifest and pinned Raylib Zig revision |
+| `zig-pkg/` | Dependency source files included in this repository snapshot |
+| `.zig-cache/`, `zig-out/` | Generated build artifacts; intentionally ignored by Git |
 
-In **this point-fill branch**, all four commands use grid-line coordinates:
+The project manifest specifies `raylib_zig` at revision `8758f4cd3a5ae0df6941c4715257223d34c5ad3e`, with package identity `raylib_zig-6.0.0-KE8RECZ8BQDm-txuospkpZHbJ6DNpacUF7D88RWQ_qAe`. **Do not substitute an arbitrary newer Zig or Raylib release** for this tested configuration.
 
-- X-axis letters are centered **under their corresponding vertical grid lines**, not between lines.
-- Y-axis numbers align **with their corresponding horizontal grid lines**, not between lines.
-- FILL's square is centered at the intersection, rather than centered inside a cell.
+The repository currently includes approximately 96 MB of `zig-pkg/` dependency sources (1,392 tracked files at the time of review). Their presence does **not** guarantee a fully offline build: dependency resolution and caches may still be needed. Use a network connection for the initial build if necessary.
 
-### Titles and panel layout
+## 4. Ubuntu 24.04 — installation and execution
 
-Each plot has a title showing the exact input and its sequence number, for example:
+### Prerequisites
 
-```text
-BAR b4,2 - Graph 1
-LINE a1,f6 - Graph 2
-FILL c2 - Graph 3
-GRID e5 - Graph 4
-```
-
-Plots are displayed in the order entered, with multiple panels arranged in the Raylib window.
-
-## Requirements
-
-- Zig **0.16.0** (the version used on the Ubuntu development laptop)
-- Raylib dependency as configured in the project
-- Ubuntu Linux graphical desktop, or another compatible build environment
-- A UTF-8 terminal for the derivation and parse-tree symbols
-
-On the Ubuntu development laptop, Zig 0.16.0 is installed at `/opt/zig/zig`. The `zig` executable selected by VS Code may be a different version, so use the explicit path below.
-
-## Build and Run
-
-Open a terminal in the repository directory:
+1. Install **Zig 0.16.0**. In the tested Ubuntu environment its executable is `/opt/zig/zig`. If installed elsewhere, substitute the correct executable path.
+2. Install Git and native graphics build prerequisites (package names for Ubuntu 24.04):
 
 ```bash
-cd ~/Desktop/CMPS3111_Project2
+sudo apt update
+sudo apt install -y git build-essential pkg-config \
+  libgl1-mesa-dev libx11-dev libxrandr-dev \
+  libxinerama-dev libxcursor-dev libxi-dev
+```
+
+3. Use a graphical desktop session with working OpenGL support.
+
+### Obtain and run the project
+
+```bash
+git clone https://github.com/MJPelayo/CMPS3111_Project2.git
+cd CMPS3111_Project2
+# If main has not yet been updated, select the tested implementation:
 git switch raylib-graphics
 /opt/zig/zig version
 /opt/zig/zig build
 /opt/zig/zig build run
 ```
 
-The version command should report `0.16.0`. A successful build may produce no terminal output.
+`zig version` must report **0.16.0**. A successful `zig build` can return without any output. After `main` is promoted, a new clone can build the default branch without switching.
 
-## Example Session
+## 5. Windows 11 — installation and execution
 
-Enter this input at the program prompt:
+### Prerequisites
+
+1. Install **Zig 0.16.0** and add the Zig executable directory to Windows `PATH`.
+2. Install **Git for Windows** and ensure `git` is available in PowerShell.
+3. Use a Windows desktop session with a working graphics driver and OpenGL support.
+4. Internet access may be needed during dependency resolution. The test machine successfully built using Zig 0.16.0 and Git 2.52.0.windows.1; a separate Visual Studio installation was **not established as required** by these tests.
+
+### Open PowerShell and configure UTF-8
+
+**Important:** PowerShell's console code page may otherwise show corrupted BNF arrows and tree branches (`ΓåÆ`, etc.). In **each new terminal session** before running the program, enter:
+
+```powershell
+chcp 65001
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+[Console]::InputEncoding = [System.Text.UTF8Encoding]::new()
+```
+
+These are **session-level settings**. They do not automatically persist when PowerShell is closed. A terminal font supporting Unicode box-drawing characters is also needed (Windows Terminal is recommended).
+
+### Obtain, compile and run
+
+```powershell
+git clone https://github.com/MJPelayo/CMPS3111_Project2.git
+cd CMPS3111_Project2
+# Until main is updated:
+git switch raylib-graphics
+zig version
+git --version
+zig build
+zig build run
+```
+
+If the folder already exists, use a fresh name, for example:
+
+```powershell
+git clone https://github.com/MJPelayo/CMPS3111_Project2.git CMPS3111_Project2_WindowsTest
+cd CMPS3111_Project2_WindowsTest
+git switch raylib-graphics
+zig build
+zig build run
+```
+
+The Windows 11 test machine compiled the project successfully, displayed the grammar, derivation and terminal parse tree, and reached the Raylib graphical-output stage. Verify the actual graphics window and normal return to the input loop on the presentation computer.
+
+## 6. Demonstration and sample tests
+
+**Valid combined sentence:**
 
 ```text
 start bar b4,2;line a1,f6;fill c2;grid e5 end
 ```
 
-The program displays the leftmost derivation, then asks whether to show the parse tree and graphical output. Answer `y` to each prompt to inspect both. Close the Raylib window to return to the terminal flow. Continue testing additional inputs; enter uppercase `STOP` to terminate the program normally.
+Expected: leftmost derivation → prompt to display terminal parse tree → prompt to display Raylib graphical output. Choose `y` for each display. Close the Raylib window to continue.
 
-### Leftmost derivation and parse tree
-
-- The leftmost derivation progresses downward using `↓` and `⇒`. A repeated `<graph>` at the left serves as a visual reference label.
-- The parse tree is printed in the terminal with connected parent-child branches.
-- Multiple plot commands use the recursive `<plot_stmts> → <plot> ; <plot_stmts>` production.
-
-## Project Structure
+**Invalid sentence:**
 
 ```text
-CMPS3111_Project2/
-├── .gitignore
-├── README.md
-├── build.zig
-├── build.zig.zon
-├── src/
-│   ├── main.zig
-│   ├── grammar.zig
-│   ├── lexer.zig
-│   ├── parser.zig
-│   ├── derivation.zig
-│   ├── parse_tree.zig
-│   ├── plot.zig
-│   └── graphics.zig
-└── tests/
+ff
 ```
 
-| File | Purpose |
-|---|---|
-| `main.zig` | Program input and output loop |
-| `grammar.zig` | Displays BNF rules |
-| `lexer.zig` | Tokenizes input |
-| `parser.zig` | Validates grammar and parses commands |
-| `derivation.zig` | Prints leftmost derivation |
-| `parse_tree.zig` | Prints the terminal parse tree |
-| `plot.zig` | Graph and plot data types |
-| `graphics.zig` | Raylib window, panels, grid lines, plot rendering and point-fill marker |
+Expected: `INPUT INVALID`, an explanation such as `Unknown word "ff"`, and `Press Enter to continue...`. Press **Enter once**; the program must return to the input prompt. On some Windows terminals the earlier text may remain in scrollback rather than being erased; verify the new prompt, not only the old text.
 
-## Testing Checklist
+**Empty input:** press Enter at the main input prompt; expect `The input cannot be empty.` Then press Enter once at the pause prompt and try again.
 
-- [ ] Build using Zig 0.16.0
-- [ ] Test BAR width and height, including no internal blue divider
-- [ ] Test LINE endpoints at exact grid intersections
-- [ ] Test FILL point marker at `c2` (not a whole cell)
-- [ ] Test FILL at edge coordinates such as `a0` and `j9`
-- [ ] Test GRID dimensions using `grid e5`
-- [ ] Verify X and Y labels align with grid lines on every plot
-- [ ] Verify each graph title reproduces the correct command and sequence number
-- [ ] Test multiple plot commands in one input
-- [ ] Verify parse tree and derivation
-- [ ] Verify closing the Raylib window returns to the input loop
-- [ ] Verify uppercase `STOP` exits normally
+**Terminate:** type **`STOP`** (uppercase) at the main input prompt; expected: `Program terminated.`
 
-The checklist is for final rehearsal and fresh checkouts; checking an item requires actually running that test.
+## 7. Troubleshooting
 
-## Git and Branch Comparison
+| Symptom | Check / solution |
+| --- | --- |
+| `zig` not recognized | Install Zig 0.16.0, add it to `PATH`, reopen PowerShell; run `zig version`. |
+| Wrong Zig version | Use 0.16.0; newer or older releases may have incompatible APIs. |
+| `git clone` says destination exists | Use another folder name or open the existing repository; do not delete existing work. |
+| BNF arrows show `ΓåÆ` or parse tree shows `Γö...` | Run the three UTF-8 PowerShell commands in §5 in the current session. |
+| Raylib dependency resolution fails | Check network access, manifest integrity and Zig version; keep `build.zig.zon` unchanged. |
+| Linux native graphics build errors | Install the Ubuntu packages in §4 and verify desktop/OpenGL support. |
+| Graphical window does not open | Run on a graphical desktop; check GPU drivers and that no remote/headless terminal is being used. |
+| Invalid input seems to stop the program | Use the verified input-handling commit `8009e8c` or later; press Enter **once** at the pause, then enter a new sentence. |
+| Old error remains visible | The terminal may retain scrollback. Check whether a fresh `Enter an input string...` prompt has appeared. |
 
-Generated Zig cache and build output should be excluded from Git tracking:
+## 8. Reproducibility record
 
-```gitignore
-.zig-cache/
-zig-out/
-```
+| Platform | Observed test result |
+| --- | --- |
+| Ubuntu 24.04 | Zig 0.16.0 build succeeded; derivation, parse tree and graphical plots observed; corrected invalid-input loop and STOP tested. |
+| Windows 11 | Zig 0.16.0 build succeeded; grammar, derivation and parse tree observed; Windows UTF-8 console fix tested; corrected invalid-input loop and STOP tested. |
 
-| Branch | Main distinction |
-|---|---|
-| `terminal-graphics` | Terminal-based graphics output |
-| `raylib-graphics` | **This branch:** Raylib graphics with point-based FILL |
-| `raylib-fill-cell` | Raylib graphics with full-cell FILL and cell-centered labels |
-| `raylib-full-graphics` | Planned separate graphical parse-tree and plot windows |
+These results reflect the group's reported tests, not an independent clean-room verification on the lecturer's machine. Test the submission ZIP on the intended presentation machine before class.
 
-The group and lecturer will review the alternatives before choosing which version to merge into `main`.
 
-## Submission Notes
+## 9. Repository and branch policy
 
-This README describes the **point-fill Raylib implementation only**. Reports and presentation slides should match the final selected branch and its verified behavior.
+Repository: https://github.com/MJPelayo/CMPS3111_Project2
+
+`raylib-graphics` is the selected final implementation. Other implementations remain available on separate branches for comparison and backup. Merge the verified `raylib-graphics` branch into `main` only after the documentation and code are committed and checked.
